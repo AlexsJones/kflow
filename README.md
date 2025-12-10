@@ -3,6 +3,8 @@ kflow — node-local network "top"
 kflow is like top for Kubernetes networking. 
 It finds connections through conntrack on your nodes and identifies point to point connections across those nodes. It is a tool for debugging and diagnostics.
 
+__Coming soon: Throughput metrics to rank connections__
+
 ![demo](output.gif)
 
 ## Installation
