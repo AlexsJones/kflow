@@ -48,3 +48,36 @@ kflow uninstall -n <namespace>
 ```
 
 Notes: some environments (for example kind) may not expose conntrack entries by default or may use a different proc path. If pods show no connections, verify conntrack is present on the node (`sudo head -n 20 /proc/net/nf_conntrack`) and that the manifest is mounting `/proc` into `/host/proc` inside the pod.
+
+## Conntrack requirement and path locations
+
+kflow relies on the kernel conntrack table being available on each node so the node-local daemon can read active connections. Many Linux distributions expose conntrack under `/proc/net/` but the exact filename and location can vary by kernel/module and distribution.
+
+Common paths you may encounter:
+
+- `/proc/net/nf_conntrack` (modern kernels, common on many distros)
+- `/proc/net/ip_conntrack` (older kernels or different module naming)
+- `/proc/net/nf_conntrack6` (IPv6 conntrack on some systems)
+
+If you run the provided DaemonSet the manifest mounts the host `/proc` into the pod at `/host/proc` and sets the default `CONNTRACK_PATH` to `/host/proc/net/nf_conntrack`. If you have a different host path, supply a container-visible path to the installer using `--conntrack`.
+
+Examples:
+
+- Node exposes the file at `/proc/net/nf_conntrack` (default):
+
+	`kflow install -n monitoring`
+
+- Node exposes the file at `/proc/net/ip_conntrack` (override):
+
+	`kflow install --conntrack /proc/net/ip_conntrack -n monitoring`
+
+- You mounted host `/proc` at a different location inside the pod (advanced):
+
+	Edit `k8s/daemonset.yaml` so the volumeMount and `CONNTRACK_PATH` agree, or pass the exact path the daemon can see inside the container with `--conntrack`.
+
+Quick debugging checklist if pods show no connections:
+
+1. On the node, check that conntrack is present and readable: `sudo head -n 20 /proc/net/nf_conntrack` (or your distro's path).
+2. Check the pod sees the same file: `kubectl exec -n <ns> <pod> -- ls -l /host/proc/net` and `kubectl exec -n <ns> <pod> -- head -n 5 /host/proc/net/nf_conntrack`.
+3. If the file is at a different path on the host, use `kflow install --conntrack <path>` where `<path>` is the host's path (our installer translates `/proc/...` to the mounted `/host/proc/...` for you).
+4. Some lightweight clusters (kind, k3s default configurations) may not enable conntrack by default; enable the kernel module or use a cluster that supports conntrack for full visibility.
