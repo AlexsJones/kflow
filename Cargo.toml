@@ -1,6 +1,6 @@
 [package]
 name = "kflow"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 description = "Node-local daemon and TUI that reads kernel conntrack and visualizes per-node network connections."
 authors = ["AlexsJones"]
