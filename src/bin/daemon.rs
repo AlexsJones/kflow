@@ -1,5 +1,5 @@
 
-use std::{sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration, collections::{HashMap, HashSet}};
 
 use axum::{extract::State, routing::get, Json, Router};
 use serde::Serialize;
@@ -33,13 +33,8 @@ async fn main() -> anyhow::Result<()> {
     let conntrack_env = std::env::var("CONNTRACK_PATH").unwrap_or_else(|_| "auto".into());
     let conntrack_path = resolve_conntrack_path(&conntrack_env);
 
-    let verbose = std::env::var("KFLOW_DEBUG").is_ok();
-    if verbose {
-        if conntrack_path.is_empty() {
-            println!("kflow daemon starting; CONNTRACK_PATH={} (no candidate found yet)", conntrack_env);
-        } else {
-            println!("kflow daemon starting; CONNTRACK_PATH={} -> {}", conntrack_env, conntrack_path);
-        }
+    if std::env::var("KFLOW_DEBUG").is_ok() {
+        eprintln!("kflow daemon starting; CONNTRACK_PATH={} -> {}", conntrack_env, if conntrack_path.is_empty() { "(no candidate found yet)".to_string() } else { conntrack_path.clone() });
     }
 
     let state: SharedConnections = Arc::new(RwLock::new(Vec::new()));
@@ -47,52 +42,49 @@ async fn main() -> anyhow::Result<()> {
         hostname::get().ok().and_then(|h| h.into_string().ok())
     });
     
-    {
-        let state = state.clone();
-        let path = conntrack_path.clone();
-        tokio::spawn(async move {
-            use std::collections::{HashMap, HashSet};
-            let mut prev_set: HashSet<Connection> = HashSet::new();
-            let mut prev_bytes: HashMap<(String, String, u16, String, u16), u64> = HashMap::new();
-            let sample_interval = 2u64;
-            
-            loop {
-                let mut flows = read_conntrack(&path);
+    let state_clone = state.clone();
+    let path = conntrack_path.clone();
+    tokio::spawn(async move {
+        let mut prev_set: HashSet<Connection> = HashSet::new();
+        let mut prev_bytes: HashMap<(String, String, u16, String, u16), u64> = HashMap::new();
+        let sample_interval = 2u64;
+        
+        loop {
+            let mut flows = read_conntrack(&path);
 
-                for flow in &mut flows {
-                    let key = (
-                        flow.proto.clone(),
-                        flow.src_ip.to_string(),
-                        flow.src_port,
-                        flow.dst_ip.to_string(),
-                        flow.dst_port,
-                    );
-                    
-                    if let Some(&prev_byte_count) = prev_bytes.get(&key) {
-                        let byte_delta = flow.bytes.saturating_sub(prev_byte_count);
-                        flow.throughput_bytes_per_sec = byte_delta / sample_interval;
-                    }
-                    
-                    prev_bytes.insert(key, flow.bytes);
+            for flow in &mut flows {
+                let key = (
+                    flow.proto.clone(),
+                    flow.src_ip.to_string(),
+                    flow.src_port,
+                    flow.dst_ip.to_string(),
+                    flow.dst_port,
+                );
+                
+                if let Some(&prev_byte_count) = prev_bytes.get(&key) {
+                    let byte_delta = flow.bytes.saturating_sub(prev_byte_count);
+                    flow.throughput_bytes_per_sec = byte_delta / sample_interval;
                 }
                 
-                let new_set: HashSet<Connection> = flows.iter().cloned().collect();
-                for added in new_set.difference(&prev_set) {
-                    println!("Added connection: {:?}", added);
-                }
-                for removed in prev_set.difference(&new_set) {
-                    println!("Removed connection: {:?}", removed);
-                }
-                prev_set = new_set;
-
-                {
-                    let mut w = state.write().await;
-                    *w = flows;
-                }
-                sleep(Duration::from_secs(sample_interval)).await;
+                prev_bytes.insert(key, flow.bytes);
             }
-        });
-    }
+            
+            let new_set: HashSet<Connection> = flows.iter().cloned().collect();
+            for added in new_set.difference(&prev_set) {
+                println!("Added connection: {:?}", added);
+            }
+            for removed in prev_set.difference(&new_set) {
+                println!("Removed connection: {:?}", removed);
+            }
+            prev_set = new_set;
+
+            {
+                let mut w = state_clone.write().await;
+                *w = flows;
+            }
+            sleep(Duration::from_secs(sample_interval)).await;
+        }
+    });
 
     let app_state = AppState { connections: state, node_name };
     let app = Router::new()

@@ -14,8 +14,6 @@ use ratatui::style::{Style, Color, Modifier};
 
 use crate::cli::types::Connection;
 
-// Compact in-memory port -> short name mappings used by the TUI.
-// Keep this list small and focused on services we care about displaying/searching.
 const PORT_MAPPINGS: &[(u16, &str)] = &[
     (1, "TCPMUX"),
     (5, "RJE"),
@@ -77,7 +75,6 @@ fn build_name_index() -> std::collections::HashMap<String, Vec<u16>> {
     for (p, name) in PORT_MAPPINGS.iter() {
         let key = name.to_lowercase();
         m.entry(key).or_default().push(*p);
-        // also index individual words so searching "kubelet" or "etcd" works
         for word in name.split(|c: char| !c.is_alphanumeric()) {
             if word.is_empty() { continue; }
             m.entry(word.to_lowercase()).or_default().push(*p);
@@ -90,30 +87,24 @@ fn conn_matches_search(c: &Connection, term: &str, name_index: &std::collections
     let s = term.trim().to_lowercase();
     if s.is_empty() { return true; }
 
-    // numeric port search
     if let Ok(pnum) = s.parse::<u16>() {
         return c.src_port == pnum || c.dst_port == pnum;
     }
 
-    // ip-ish search (simple heuristic)
     if s.contains('.') || s.contains(':') {
         return c.src_ip.contains(&s) || c.dst_ip.contains(&s);
     }
 
-    // service name lookup via index
     if let Some(ports) = name_index.get(&s) {
         if ports.iter().any(|p| *p == c.src_port || *p == c.dst_port) { return true; }
     }
 
-    // fallback: substring match against known port descriptions
     let src_desc = port_reservation_info(c.src_port).to_lowercase();
     let dst_desc = port_reservation_info(c.dst_port).to_lowercase();
     src_desc.contains(&s) || dst_desc.contains(&s)
 }
 
 fn rfc1700_snippet_for_port(port: u16) -> String {
-    // Simple one-line snippet: prefer the concise mapping if available, otherwise fallback
-    // to the same text that port_reservation_info would return.
     for (p, name) in PORT_MAPPINGS.iter() {
         if *p == port {
             return format!("{} ({})", p, name);
@@ -136,7 +127,6 @@ fn format_throughput(bytes_per_sec: u64) -> String {
 }
 
 fn port_reservation_info(port: u16) -> String {
-    // Expanded common services map (sourced from IANA / Wikipedia list subset)
     match port {
         1 => "TCP Port Service Multiplexer (TCPMUX)".into(),
         5 => "Remote Job Entry (RJE)".into(),
@@ -494,7 +484,6 @@ pub async fn run_tui(state: Arc<RwLock<HashMap<String, Vec<Connection>>>>, kube_
                         SortMode::ByState => "Connections (sorted by state)",
                     };
 
-                    // split the Connections area into a list (top) and a small details/snippet area (bottom)
                     let conn_chunks = Layout::default()
                         .direction(Direction::Vertical)
                         .constraints([Constraint::Percentage(75), Constraint::Percentage(25)].as_ref())
@@ -506,9 +495,7 @@ pub async fn run_tui(state: Arc<RwLock<HashMap<String, Vec<Connection>>>>, kube_
                         .highlight_symbol("» ");
                     f.render_stateful_widget(list, conn_chunks[0], &mut list_state);
 
-                    // show a one-line RFC1700 snippet or fallback for the selected connection's destination port
                     let snippet = {
-                        // guard: conns correspond to items in same order
                         let idx = conn_selected.min(conns.len().saturating_sub(1));
                         if let Some(c) = conns.get(idx) {
                             let p = c.dst_port;
@@ -526,7 +513,6 @@ pub async fn run_tui(state: Arc<RwLock<HashMap<String, Vec<Connection>>>>, kube_
                     };
                     f.render_widget(details, conn_chunks[1]);
                 } else {
-                    // no connections to show
                     let conn_chunks = Layout::default()
                         .direction(Direction::Vertical)
                         .constraints([Constraint::Percentage(100)].as_ref())
@@ -560,7 +546,6 @@ pub async fn run_tui(state: Arc<RwLock<HashMap<String, Vec<Connection>>>>, kube_
             f.render_widget(sb, status_area);
 
             let modal_visible = kube_mode && nodes.is_empty() && did_fetch_once.load(Ordering::SeqCst) && !modal_dismissed;
-            // If the user requested the help modal, show that on top of everything.
                 if help_modal {
                 let mw = (size.width.saturating_mul(70)) / 100;
                 let mh = (size.height.saturating_mul(70)) / 100;
@@ -568,7 +553,6 @@ pub async fn run_tui(state: Arc<RwLock<HashMap<String, Vec<Connection>>>>, kube_
                 let my = size.y + (size.height.saturating_sub(mh)) / 2;
                 let area = ratatui::layout::Rect::new(mx, my, mw, mh);
                 let help_text = "Key bindings:\n\nUp/Down: move selection\nLeft/Right or Tab: change focus pane\nEnter: open connections / toggle details\nq: quit\np: start search (type term, Enter to apply, Esc to cancel)\nEsc: cancel typing / dismiss modal\nt: toggle sort by state\nf: cycle state filter (none -> ESTABLISHED -> TIME_WAIT)\nc: clear pair-filter\nn: toggle hostnames / IPs\nv: cycle IP version filter (both -> IPv4 -> IPv6)\nh: show this help\n\nPress Enter, Esc, or 'h' to close.";
-                // clear area behind modal and draw a dark background so text is readable
                 f.render_widget(Clear, area);
                 let p = Paragraph::new(help_text)
                     .block(Block::default().borders(Borders::ALL).title("kflow — Help"))

@@ -200,6 +200,5 @@ fn update_manifest_conntrack(manifest: &str, ct_repl: &str) -> String {
             }
         }
     }
-    // fallback: simple replacements
     manifest.replace("/host/proc/net/nf_conntrack", ct_repl).replace("/proc/net/nf_conntrack", ct_repl)
 }
