@@ -9,10 +9,28 @@ __Coming soon: Throughput metrics to rank connections__
 
 ## Installation
 
+### Via Krew (kubectl plugin)
+
+```bash
+kubectl krew install kflow
+kubectl kflow install -n monitoring  # Deploy DaemonSet
+kubectl kflow                        # Open TUI
 ```
+
+### Via Homebrew
+
+```bash
+brew install AlexsJones/kflow/kflow
+kflow install -n monitoring
+kflow
+```
+
+### Via Cargo
+
+```bash
 cargo install kflow
-kflow install # Installs the daemonset
-kflow # opens tui
+kflow install  # Installs the daemonset
+kflow          # opens tui
 ```
 
 _Press h for keybinding information_
